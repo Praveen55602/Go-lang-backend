@@ -14,17 +14,27 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	"golang.org/x/crypto/bcrypt"
 )
 
 var userCollection *mongo.Collection = database.OpenCollection(*database.Client, "user")
 var validate = validator.New()
 
-func HashPassword() {
-
+func HashPassword(password string) (string, error) {
+	//will return a byte array and and error
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), 14)
+	if err != nil {
+		log.Panic(err)
+		return "", err
+	}
+	return string(hashedPassword), nil
 }
 
-func VerifyPassword() {
+func VerifyPassword(actualPassword string, claimedPassword string) bool {
+	//actual password is stored in the hashed form in the db so this function will compare the hash with the claimed password
+	err := bcrypt.CompareHashAndPassword([]byte(actualPassword), []byte(claimedPassword))
 
+	return err == nil
 }
 
 func Signup(ctx *gin.Context) {
@@ -64,10 +74,50 @@ func Signup(ctx *gin.Context) {
 	newUser.Updated_at = newUser.Created_at
 	newUser.ID = primitive.NewObjectID()
 	newUser.User_id = newUser.ID.Hex()
-	//token, refreshToken, _ = helper.GenerateAllTokens(*user.Email, *user.First_name, *user.Last_name)
+	//token, refreshToken, _ := helper.GenerateAllTokens(*newUser.Email, *newUser.First_name, *newUser.Last_name, *newUser.User_type, newUser.User_id)
+
+	hashedPassword, hashErr := HashPassword(*newUser.Password)
+	if hashErr != nil {
+		log.Panic("error while trying to hash the password")
+		return
+	}
+
+	newUser.Password = &hashedPassword
+	resultInserNumber, insertErr := userCollection.InsertOne(newCtx, newUser)
+	if insertErr != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to register user"})
+		return
+	}
+	defer cancel()
+	ctx.JSON(http.StatusOK, resultInserNumber)
+
 }
 
-func Login() {
+func Login(ctx *gin.Context) {
+	var newCtx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
+	defer cancel()
+	var user models.User
+	var foundUser models.User
+	err := ctx.BindJSON(&user)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	searchErr := userCollection.FindOne(newCtx, bson.M{"email": user.Email}).Decode(&foundUser)
+
+	if searchErr != nil || !VerifyPassword(*user.Password, *foundUser.Password) {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "wrong email or password"})
+		return
+	}
+
+	if foundUser.Email == nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "user does not exists"})
+		return
+	}
+
+	//token, refreshToken, _ := helper.GenerateAllTokens(*foundUser.Email, *foundUser.First_name, *foundUser.Last_name, *foundUser.User_type, foundUser.User_id)
+	ctx.JSON(http.StatusOK, foundUser)
+	//helper.UpdateAllTokens(token, refreshToken, foundUser.User_id)
 
 }
 
