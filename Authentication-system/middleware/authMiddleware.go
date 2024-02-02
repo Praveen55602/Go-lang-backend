@@ -1,1 +1,46 @@
 package middleware
+
+import (
+	helper "auth/helpers"
+	"net/http"
+	"strings"
+
+	"github.com/gin-gonic/gin"
+)
+
+func Authenticate(c *gin.Context) {
+	// Extract the token from the Authorization header
+	authHeader := c.GetHeader("token")
+	if authHeader == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is missing"})
+		c.Abort()
+		return
+	}
+
+	// Check if the Authorization header has the expected format ("Bearer <token>")
+	parts := strings.Fields(authHeader) // this splits the authe header at " "
+	if len(parts) != 2 || parts[0] != "Bearer" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid Authorization header format"})
+		c.Abort()
+		return
+	}
+
+	// Extract the token from the header
+	tokenString := parts[1]
+	claims, err := helper.ValidateToken(tokenString)
+
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		c.Abort()
+		return
+	}
+
+	//now setting up the payload info which is right now present only in the header that to encoded. into the context object as key value pair so that the user related info is available for the subsequent middleware functions or request handlers. and also it avoids the need to create global variables in the code to store user info
+	c.Set("email", claims.Email)
+	c.Set("first_name", claims.First_name)
+	c.Set("last_name", claims.Last_name)
+	c.Set("uid", claims.Uid)
+	c.Set("user_type", claims.User_type)
+
+	c.Next() // passing control to the next middle ware or next handler
+}

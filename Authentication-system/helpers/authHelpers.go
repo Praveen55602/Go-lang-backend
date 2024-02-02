@@ -2,8 +2,10 @@ package helper
 
 import (
 	"errors"
+	"log"
 
 	"github.com/gin-gonic/gin"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func CheckUserType(c *gin.Context, role string) error {
@@ -27,4 +29,20 @@ func MatchUserTypeToUid(c *gin.Context, userId string) error {
 	}
 	err = CheckUserType(c, userType)
 	return err
+}
+
+func HashPassword(password string) (string, error) {
+	//will return a byte array and and error
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), 14)
+	if err != nil {
+		log.Panic(err)
+		return "", err
+	}
+	return string(hashedPassword), nil
+}
+
+func VerifyPassword(actualPassword string, claimedPassword string) bool {
+	//actual password is stored in the hashed form in the db so this function will compare the hash with the claimed password
+	err := bcrypt.CompareHashAndPassword([]byte(actualPassword), []byte(claimedPassword))
+	return err == nil
 }

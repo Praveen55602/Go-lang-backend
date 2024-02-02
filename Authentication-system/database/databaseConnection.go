@@ -25,7 +25,6 @@ func DBinstance() *mongo.Client {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	//cancel function cleans up the resources associated with the context and will be called once the this functions exits or if the context takes more time then the timeout timer, until then it will be defered
 	defer cancel()
-
 	MongoDb := os.Getenv("MONGODB_URL")
 	clientOptions := options.Client().ApplyURI(MongoDb)
 	//passing context object where all the result of api call will be put

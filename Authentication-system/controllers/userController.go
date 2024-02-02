@@ -7,6 +7,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -14,28 +15,10 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
-	"golang.org/x/crypto/bcrypt"
 )
 
 var userCollection *mongo.Collection = database.OpenCollection(*database.Client, "user")
 var validate = validator.New()
-
-func HashPassword(password string) (string, error) {
-	//will return a byte array and and error
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), 14)
-	if err != nil {
-		log.Panic(err)
-		return "", err
-	}
-	return string(hashedPassword), nil
-}
-
-func VerifyPassword(actualPassword string, claimedPassword string) bool {
-	//actual password is stored in the hashed form in the db so this function will compare the hash with the claimed password
-	err := bcrypt.CompareHashAndPassword([]byte(actualPassword), []byte(claimedPassword))
-
-	return err == nil
-}
 
 func Signup(ctx *gin.Context) {
 	var newUser models.User
@@ -74,9 +57,9 @@ func Signup(ctx *gin.Context) {
 	newUser.Updated_at = newUser.Created_at
 	newUser.ID = primitive.NewObjectID()
 	newUser.User_id = newUser.ID.Hex()
-	//token, refreshToken, _ := helper.GenerateAllTokens(*newUser.Email, *newUser.First_name, *newUser.Last_name, *newUser.User_type, newUser.User_id)
+	token, _, _ := helper.GenerateAllTokens(*newUser.Email, *newUser.First_name, *newUser.Last_name, *newUser.User_type, newUser.User_id)
 
-	hashedPassword, hashErr := HashPassword(*newUser.Password)
+	hashedPassword, hashErr := helper.HashPassword(*newUser.Password)
 	if hashErr != nil {
 		log.Panic("error while trying to hash the password")
 		return
@@ -89,6 +72,7 @@ func Signup(ctx *gin.Context) {
 		return
 	}
 	defer cancel()
+	ctx.JSON(http.StatusOK, gin.H{"token": token, "message": "Signup successful"})
 	ctx.JSON(http.StatusOK, resultInserNumber)
 
 }
@@ -105,7 +89,7 @@ func Login(ctx *gin.Context) {
 	}
 	searchErr := userCollection.FindOne(newCtx, bson.M{"email": user.Email}).Decode(&foundUser)
 
-	if searchErr != nil || !VerifyPassword(*user.Password, *foundUser.Password) {
+	if searchErr != nil || !helper.VerifyPassword(*foundUser.Password, *user.Password) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "wrong email or password"})
 		return
 	}
@@ -115,14 +99,74 @@ func Login(ctx *gin.Context) {
 		return
 	}
 
-	//token, refreshToken, _ := helper.GenerateAllTokens(*foundUser.Email, *foundUser.First_name, *foundUser.Last_name, *foundUser.User_type, foundUser.User_id)
-	ctx.JSON(http.StatusOK, foundUser)
-	//helper.UpdateAllTokens(token, refreshToken, foundUser.User_id)
+	token, refreshToken, tokenErr := helper.GenerateAllTokens(*foundUser.Email, *foundUser.First_name, *foundUser.Last_name, *foundUser.User_type, foundUser.User_id)
+	if tokenErr != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "error while generating token"})
+		return
+	}
+
+	ctx.Set("email", *foundUser.Email)
+	ctx.Set("first_name", *foundUser.First_name)
+	ctx.Set("last_name", *foundUser.Last_name)
+	ctx.Set("user_type", *foundUser.User_type)
+	ctx.Set("token", token)
+	ctx.Set("refresh_token", refreshToken)
+	ctx.JSON(http.StatusOK, ctx.Keys)
 
 }
 
-func GetUsers() {
+func GetUsers(ctx *gin.Context) {
+	err := helper.CheckUserType(ctx, "ADMIN")
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	var newCtx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
 
+	//records perpage will be send by the ui as query parameter
+	recordsPerPage, err := strconv.Atoi(ctx.Query("recordPerPage"))
+
+	if err != nil || recordsPerPage < 1 {
+		recordsPerPage = 10
+	}
+
+	page, pageErr := strconv.Atoi(ctx.Query("page"))
+	if pageErr != nil || page < 1 {
+		page = 1
+	}
+
+	startIndex, err := strconv.Atoi(ctx.Query("startIndex"))
+	if err != nil {
+		startIndex = (page - 1) * recordsPerPage
+	}
+	matchStage := bson.D{{Key: "$match", Value: bson.D{{}}}}
+
+	groupStage := bson.D{{Key: "$group", Value: bson.D{
+		{Key: "_id", Value: bson.D{{Key: "_id", Value: "null"}}},
+		{Key: "total_count", Value: bson.D{{Key: "$sum", Value: 1}}},
+		{Key: "data", Value: bson.D{{Key: "$push", Value: "$$ROOT"}}},
+	}}}
+
+	projectStage := bson.D{
+		{Key: "$project", Value: bson.D{
+			{Key: "_id", Value: 0},
+			{Key: "total_count", Value: 1},
+			{Key: "user_items", Value: bson.D{{Key: "$slice", Value: []interface{}{"$data", startIndex, recordsPerPage}}}},
+		}},
+	}
+
+	result, err := userCollection.Aggregate(newCtx, mongo.Pipeline{matchStage, groupStage, projectStage})
+	defer cancel()
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "error occured while listing users"})
+	}
+	var allUsers []bson.M
+	err = result.All(newCtx, &allUsers)
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
+	ctx.JSON(http.StatusOK, allUsers[0])
 }
 
 func GetUser() gin.HandlerFunc {

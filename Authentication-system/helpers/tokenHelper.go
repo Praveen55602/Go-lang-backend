@@ -1,12 +1,16 @@
 package helper
 
 import (
+	//"context"
 	"log"
 	"os"
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
+	//"go.mongodb.org/mongo-driver/bson/primitive"
 )
+
+var secretKey = []byte(os.Getenv("SECRET_KEY"))
 
 // a token is made of 3 things
 // Header.Payload.Sign
@@ -23,7 +27,6 @@ type Claims struct {
 }
 
 func GenerateAllTokens(email string, firstName string, lastName string, userType string, uid string) (string, string, error) {
-	secretKey := []byte(os.Getenv("SECRET_KEY"))
 
 	//this is our payload
 	accessTokenClaims := &Claims{
@@ -69,4 +72,30 @@ func GenerateAllTokens(email string, firstName string, lastName string, userType
 
 	return tokenString, refreshTokenString, nil
 
+}
+
+func UpdateAllTokens(signedToken string, signedRefreshToken string, userId string) {
+	//ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+
+	//var updatedObj primitive.D
+}
+
+func ValidateToken(tokenString string) (*Claims, error) {
+	claims := &Claims{}
+
+	//this method does all the work compares the new generated sign with the already present sign in the token and also checks if th token is already expired, and then set all the payload info that is available in the token into the claims object that is created above if the token is valid
+	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+		return secretKey, nil
+	})
+
+	// to make this code simple later on try directly sending the claims and err as if there is err then claims should also be a nil object
+	if err != nil {
+		return nil, err
+	}
+
+	if !token.Valid {
+		return nil, err
+	}
+
+	return claims, nil
 }
