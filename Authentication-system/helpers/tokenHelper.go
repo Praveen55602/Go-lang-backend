@@ -2,6 +2,7 @@ package helper
 
 import (
 	//"context"
+	"errors"
 	"log"
 	"os"
 	"time"
@@ -36,7 +37,7 @@ func GenerateAllTokens(email string, firstName string, lastName string, userType
 		User_type:  userType,
 		Uid:        uid,
 		StandardClaims: jwt.StandardClaims{
-			ExpiresAt: time.Now().Add(15 * time.Minute).Unix(),
+			ExpiresAt: time.Now().Add(10 * time.Second).Unix(),
 		},
 	}
 	//here we are specifing what algo to use and what is the payload
@@ -58,7 +59,7 @@ func GenerateAllTokens(email string, firstName string, lastName string, userType
 		User_type:  userType,
 		Uid:        uid,
 		StandardClaims: jwt.StandardClaims{
-			ExpiresAt: time.Now().Add(7 * 24 * time.Hour).Unix(), //refresh token expires in 7 days
+			ExpiresAt: time.Now().Add(50 * time.Second).Unix(), //refresh token expires in 7 days
 		},
 	}
 
@@ -74,28 +75,25 @@ func GenerateAllTokens(email string, firstName string, lastName string, userType
 
 }
 
-func UpdateAllTokens(signedToken string, signedRefreshToken string, userId string) {
+func UpdateAllTokens(refreshToken string) (string, string, error) {
 	//ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	claims, validationErr := ValidateToken(refreshToken)
+	if validationErr != nil {
+		return "", "", errors.New("expired refresh token")
+	}
 
-	//var updatedObj primitive.D
+	//sending all three if there'll be any error while generating also that also will be send
+	return GenerateAllTokens(claims.Email, claims.First_name, claims.Last_name, claims.User_type, claims.Uid)
+
 }
 
 func ValidateToken(tokenString string) (*Claims, error) {
 	claims := &Claims{}
 
 	//this method does all the work compares the new generated sign with the already present sign in the token and also checks if th token is already expired, and then set all the payload info that is available in the token into the claims object that is created above if the token is valid
-	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+	_, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
 		return secretKey, nil
 	})
 
-	// to make this code simple later on try directly sending the claims and err as if there is err then claims should also be a nil object
-	if err != nil {
-		return nil, err
-	}
-
-	if !token.Valid {
-		return nil, err
-	}
-
-	return claims, nil
+	return claims, err
 }
