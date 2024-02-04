@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"websocket/chatApp/user"
 
 	"github.com/gorilla/websocket"
 )
@@ -17,7 +18,7 @@ var (
 		},
 	}
 
-	clients = make(map[*websocket.Conn]bool)
+	clients = make(map[*user.User]bool)
 )
 
 // Defines a function to handle WebSocket connections. This function is called when a client requests an upgrade to WebSocket.
@@ -29,12 +30,22 @@ func webSocketHandler(w http.ResponseWriter, r *http.Request) {
 		fmt.Println(err)
 		return
 	}
+
+	conn.WriteMessage(websocket.TextMessage, []byte("Enter your username: "))
+	_, username, err := conn.ReadMessage()
+	println("new user added is ", string(username))
+
+	if err != nil {
+		println("error while reading", err.Error())
+		return
+	}
+	newUser := &user.User{Name: string(username), Conn: conn}
 	defer func() {
-		delete(clients, conn)
+		delete(clients, newUser)
 		conn.Close()
 	}()
 
-	clients[conn] = true
+	clients[newUser] = true
 	for {
 		messageType, p, err := conn.ReadMessage()
 		if err != nil {
@@ -42,12 +53,13 @@ func webSocketHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		//shows recived message from the client
-		log.Printf("receivd message is %s", p)
+		//log.Printf("receivd message is %s", p)
 
 		//iterate over all the connected client and sends them the same message except self
 		for client := range clients {
-			if client != conn {
-				err := client.WriteMessage(messageType, p)
+			if client.Conn != conn {
+				message := fmt.Sprintf("%s: %s", newUser.Name, string(p))
+				err := client.Conn.WriteMessage(messageType, []byte(message))
 				if err != nil {
 					fmt.Println(err)
 					return
