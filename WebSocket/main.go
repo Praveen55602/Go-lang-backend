@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"websocket/chatApp/user"
 
 	"github.com/gorilla/websocket"
@@ -32,6 +33,7 @@ func webSocketHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	conn.WriteMessage(websocket.TextMessage, []byte("Enter your username: "))
+	//conn.ReadMessage pauses the processing of the function until client sends some message
 	_, username, err := conn.ReadMessage()
 	println("new user added is ", string(username))
 
@@ -39,26 +41,38 @@ func webSocketHandler(w http.ResponseWriter, r *http.Request) {
 		println("error while reading", err.Error())
 		return
 	}
-	newUser := &user.User{Name: string(username), Conn: conn}
+	user := &user.User{Name: string(username), Conn: conn}
 	defer func() {
-		delete(clients, newUser)
+		delete(clients, user)
 		conn.Close()
 	}()
 
-	clients[newUser] = true
+	clients[user] = true
 	for {
+		//here also in the for loop it will wait for the client to send some request then only process the code further
 		messageType, p, err := conn.ReadMessage()
 		if err != nil {
 			fmt.Println(err)
 			return
 		}
-		//shows recived message from the client
-		//log.Printf("receivd message is %s", p)
+
+		if name, msg := isPrivateMessage(string(p)); name != "" && msg != "" {
+			reciever := findUserByName(name)
+			fmt.Println("message to received ", name)
+
+			if reciever == nil {
+				fmt.Println("no user with this username found")
+				continue
+			}
+
+			privateMessageHandler(user, reciever, msg)
+			continue
+		}
 
 		//iterate over all the connected client and sends them the same message except self
 		for client := range clients {
-			if client.Conn != conn {
-				message := fmt.Sprintf("%s: %s", newUser.Name, string(p))
+			if client != user {
+				message := fmt.Sprintf("%s: %s", user.Name, string(p))
 				err := client.Conn.WriteMessage(messageType, []byte(message))
 				if err != nil {
 					fmt.Println(err)
@@ -67,6 +81,28 @@ func webSocketHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+}
+
+func privateMessageHandler(sender *user.User, reciever *user.User, messageToSend string) {
+	message := fmt.Sprintf("%s: %s", sender.Name, messageToSend)
+	reciever.RecieveMessage(message)
+}
+
+func isPrivateMessage(message string) (string, string) {
+	userAndMessage := strings.Split(message, ":")
+	if len(userAndMessage) != 2 {
+		return "", ""
+	}
+	return userAndMessage[0], userAndMessage[1]
+}
+
+func findUserByName(name string) *user.User {
+	for client := range clients {
+		if client.Name == name {
+			return client
+		}
+	}
+	return nil
 }
 
 func main() {
